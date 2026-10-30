@@ -162,7 +162,7 @@ nizam_run() {
     maturin develop
 
     echo "[nizam] Running main.py..."
-    "$py_bin" main.py
+    "$py_bin" ./nizam
 }
 
 function main() {

@@ -1,2 +1,5 @@
 target/*
 Cargo.lock
+nizam/__pycache__/*
+nizam/nizam.abi3.so
+.venv/*
