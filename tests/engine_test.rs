@@ -110,7 +110,7 @@ fn substitutes_bindings_before_running() {
         .execute(noop_error, noop_warning, noop_note)
         .expect("engine should run");
 
-    assert_eq!(report.model.tasks["1"].cmd, "echo hello");
+    assert_eq!(report.model.tasks["1"].cmd.as_str(), Some("echo hello"));
     assert_eq!(report.results.len(), 1);
     assert!(report.results[0].is_ok());
 

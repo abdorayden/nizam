@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use nizam::json::TaskOptions;
+use nizam::json::{Cmd, TaskOptions};
 use nizam::kahn;
 
 // nsan3ou tâches test bach nst3mlouhom fi les tests
@@ -20,7 +20,7 @@ fn make_tasks(items: &[(&str, &[&str])]) -> HashMap<String, TaskOptions> {
 
         // nsan3ou tâche
         let task = TaskOptions {
-            cmd: format!("echo {id}"),
+            cmd: Cmd::SimplCmd(format!("echo {id}")),
             deps: dep_list,
         };
 
