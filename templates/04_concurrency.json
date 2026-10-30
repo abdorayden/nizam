@@ -1,0 +1,20 @@
+// Nine independent jobs with limite_tasks = 3.
+// Each job sleeps 0.2s, so the whole template should take about 0.6s.
+{
+    "limite_tasks": 3,
+    "exit_on_first_error": true,
+    "bind": {
+        "delay": "0.2"
+    },
+    "tasks": {
+        "job_1": { "cmd": "sleep ^delay^" },
+        "job_2": { "cmd": "sleep ^delay^" },
+        "job_3": { "cmd": "sleep ^delay^" },
+        "job_4": { "cmd": "sleep ^delay^" },
+        "job_5": { "cmd": "sleep ^delay^" },
+        "job_6": { "cmd": "sleep ^delay^" },
+        "job_7": { "cmd": "sleep ^delay^" },
+        "job_8": { "cmd": "sleep ^delay^" },
+        "job_9": { "cmd": "echo all jobs are done" }
+    }
+}

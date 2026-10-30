@@ -1,0 +1,12 @@
+// With exit_on_first_error = true the engine stops after the failing level.
+// "after" depends on "bad", so it must NOT run.
+{
+    "exit_on_first_error": true,
+    "bind": {
+        "root": "/tmp/nizam-demo/exit_on_error"
+    },
+    "tasks": {
+        "bad":   { "cmd": "false" },
+        "after": { "cmd": "touch ^root^-should-not-exist", "deps": ["bad"] }
+    }
+}

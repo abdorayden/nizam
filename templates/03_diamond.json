@@ -1,0 +1,17 @@
+// Diamond graph: root splits into left/right and merges again.
+// left and right run at the same time (same Kahn level).
+{
+    "limite_tasks": 4,
+    "exit_on_first_error": true,
+    "bind": {
+        "root": "/tmp/nizam-demo/diamond"
+    },
+    "tasks": {
+        "clean":  { "cmd": "rm -rf ^root^" },
+        "root":   { "cmd": "mkdir -p ^root^", "deps": ["clean"] },
+        "left":   { "cmd": "mkdir -p ^root^/left", "deps": ["root"] },
+        "right":  { "cmd": "mkdir -p ^root^/right", "deps": ["root"] },
+        "merge":  { "cmd": "mkdir -p ^root^/merge", "deps": ["left", "right"] },
+        "verify": { "cmd": "ls ^root^", "deps": ["merge"] }
+    }
+}

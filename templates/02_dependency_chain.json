@@ -1,0 +1,16 @@
+// A chain with two independent branches in the middle.
+// expected levels: clean -> create -> [file_a, file_b] -> list -> done
+{
+    "exit_on_first_error": true,
+    "bind": {
+        "root": "/tmp/nizam-demo/chain"
+    },
+    "tasks": {
+        "clean":  { "cmd": "rm -rf ^root^" },
+        "create": { "cmd": "mkdir -p ^root^/src", "deps": ["clean"] },
+        "file_a": { "cmd": "touch ^root^/src/a.txt", "deps": ["create"] },
+        "file_b": { "cmd": "touch ^root^/src/b.txt", "deps": ["create"] },
+        "list":   { "cmd": "ls ^root^/src", "deps": ["file_a", "file_b"] },
+        "done":   { "cmd": "touch ^root^/done", "deps": ["list"] }
+    }
+}
