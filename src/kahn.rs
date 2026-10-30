@@ -125,7 +125,7 @@ pub fn commands(result: &KahnResult, tasks: &Tasks) -> Vec<Vec<String>> {
         // njam3ou les commandes ta3 les tâches li fi hada niveau
         for id in level {
             if let Some(task) = tasks.get(id) {
-                level_commands.push(task.cmd.clone());
+                level_commands.push(task.cmd.as_str().unwrap_or_default().to_string());
             }
         }
 
