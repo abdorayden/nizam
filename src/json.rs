@@ -12,12 +12,15 @@
 //   "bind" : {
 //      "duration" : "5"
 //   },
+//   "uses": [
+//      "bindings.json"
+//   ],
 //   "tasks": {
-//     "1": { 
-//          "cmd": "sleep ^duration^" 
+//     "1": {
+//          "cmd": "sleep ^duration^"
 //      },
-//     "2": { 
-//          "cmd": "sleep 10", "deps": ["1"] 
+//     "2": {
+//          "cmd": "sleep 10", "deps": ["1"]
 //      },
 //      "3": {
 //          "cmd": [
@@ -44,12 +47,13 @@ use serde::Serialize;
 
 // standerd rust libs
 use std::collections::HashMap;
+use std::env;
 use std::fs::File;
 use std::io::BufReader;
-use std::io::Read;
 use std::io::BufWriter;
+use std::io::Read;
 use std::io::Result;
-use std::env;
+use std::path::{Path, PathBuf};
 
 /// built-in variables a conditional `when` can check.
 /// `os` is matched against the current platform (`std::env::consts::OS`).
@@ -101,6 +105,7 @@ pub struct TaskOptions {
 
 pub type Tasks = HashMap<String, TaskOptions>;
 pub type Bindings = HashMap<String, String>;
+pub type Uses = Vec<String>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct Model {
@@ -109,7 +114,9 @@ pub struct Model {
     #[serde(default)]
     pub exit_on_first_error: Option<bool>, // this field makes the engine exit on first error
     pub bind: Option<Bindings>,
-    pub tasks: Tasks
+    #[serde(default)]
+    pub uses: Option<Uses>,
+    pub tasks: Tasks,
 }
 
 fn remove_comments(content: &mut Vec<u8>) {
@@ -129,7 +136,7 @@ fn remove_comments(content: &mut Vec<u8>) {
     *content = cleaned;
 }
 
-pub fn load(file_path: &str) -> Result<Model> {
+fn read_model(file_path: &Path) -> Result<Model> {
     let file = File::open(file_path)?;
     let mut content = Vec::new();
     BufReader::new(file).read_to_end(&mut content)?;
@@ -139,6 +146,75 @@ pub fn load(file_path: &str) -> Result<Model> {
 
     serde_json::from_str(content)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e).into())
+}
+
+/// loads a template and recursively merges the tasks and bindings of every
+/// template listed in `uses`. local tasks/bindings override inherited ones.
+pub fn load(file_path: &str) -> Result<Model> {
+    let mut stack: Vec<PathBuf> = Vec::new();
+    load_with_uses(Path::new(file_path), &mut stack)
+}
+
+fn load_with_uses(file_path: &Path, stack: &mut Vec<PathBuf>) -> Result<Model> {
+    let canonical = std::fs::canonicalize(file_path)?;
+
+    if let Some(start) = stack.iter().position(|path| path == &canonical) {
+        let chain: Vec<String> = stack[start..]
+            .iter()
+            .chain(std::iter::once(&canonical))
+            .map(|path| path.display().to_string())
+            .collect();
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("cyclic `uses` between templates: {}", chain.join(" -> ")),
+        ));
+    }
+
+    let mut model = read_model(file_path)?;
+    let uses = model.uses.take().unwrap_or_default();
+
+    stack.push(canonical);
+    let result = inherit_uses(&mut model, file_path, &uses, stack);
+    stack.pop();
+
+    result?;
+    Ok(model)
+}
+
+/// merges the tasks and bindings of `uses` into `model`. bindings and tasks
+/// defined locally win over inherited ones; later entries in `uses` win over
+/// earlier ones.
+fn inherit_uses(
+    model: &mut Model,
+    file_path: &Path,
+    uses: &[String],
+    stack: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let base = file_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut inherited_tasks = Tasks::new();
+    let mut inherited_bind = Bindings::new();
+
+    for used in uses {
+        let used_model = load_with_uses(&base.join(used), stack)?;
+        inherited_tasks.extend(used_model.tasks);
+        if let Some(bind) = used_model.bind {
+            inherited_bind.extend(bind);
+        }
+    }
+
+    inherited_tasks.extend(std::mem::take(&mut model.tasks));
+    model.tasks = inherited_tasks;
+
+    if let Some(bind) = model.bind.take() {
+        inherited_bind.extend(bind);
+    }
+    model.bind = if inherited_bind.is_empty() {
+        None
+    } else {
+        Some(inherited_bind)
+    };
+
+    Ok(())
 }
 
 /// for serialize
@@ -153,7 +229,7 @@ pub fn unload(file_path: &str, model: &Model) -> Result<()> {
 /// EngineTemplate: the real template that used by the engine after parsing bindings and expressions
 /// in json file
 pub struct EngineTemplate {
-    pub model : Result<Model>
+    pub model: Result<Model>,
 }
 
 /// replaces every `^var^` occurrence in `cmd` with the value of `var`
@@ -220,9 +296,7 @@ fn resolve_conditions(conditions: Vec<Conditional>, bind: &Bindings) -> String {
 impl EngineTemplate {
     pub fn new(file_path: &str) -> Self {
         let model = load(file_path);
-        Self {
-            model : model
-        }
+        Self { model: model }
     }
 
     pub fn get_error(&self) -> Option<String> {
@@ -241,19 +315,31 @@ impl EngineTemplate {
 
         let mut bind = og_model.bind.clone().unwrap_or_default();
 
-        bind.insert( // add builtin bindings
-            "pwd".to_string(),
-            if let Some(path)= env::home_dir() {
+        bind.insert(
+            // add builtin bindings
+            "HOME".to_string(),
+            if let Some(path) = env::home_dir() {
                 path.to_str().unwrap_or(&String::new()).to_string()
             } else {
                 String::new()
-            }
+            },
+        );
+
+        bind.insert(
+            // add builtin bindings
+            "PWD".to_string(),
+            env::current_dir()
+                .unwrap_or((&String::new()).into())
+                .to_str()
+                .unwrap_or(&String::new())
+                .to_string(),
         );
 
         let mut model = Model {
             limite_tasks: og_model.limite_tasks,
             exit_on_first_error: og_model.exit_on_first_error,
             bind: og_model.bind,
+            uses: None,
             tasks: Tasks::new(),
         };
 
