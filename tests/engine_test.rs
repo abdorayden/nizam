@@ -366,3 +366,43 @@ fn invalid_task_limit_warns_and_still_runs() {
     drop(warnings);
     fs::remove_dir_all(&dir).ok();
 }
+
+// uses
+
+#[test]
+fn runs_tasks_inherited_through_uses() {
+    let dir = tmp_dir("uses");
+    let base_done = dir.join("base.done");
+    let main_done = dir.join("main.done");
+
+    write_template(
+        &dir,
+        "base.json",
+        &format!(
+            r#"{{ "tasks": {{ "base": {{ "cmd": "{}" }} }} }}"#,
+            touch_cmd(&base_done)
+        ),
+    );
+
+    let body = format!(
+        r#"{{
+            "uses": ["base.json"],
+            "tasks": {{
+                "main": {{ "cmd": "{}", "deps": ["base"] }}
+            }}
+        }}"#,
+        touch_cmd(&main_done)
+    );
+    let path = write_template(&dir, "main.json", &body);
+
+    let report = Engine::new(path.to_str().unwrap())
+        .execute(noop_error, noop_warning, noop_note)
+        .expect("engine should run");
+
+    assert_eq!(report.results.len(), 2);
+    assert!(report.results.iter().all(|info| info.is_ok()));
+    assert!(base_done.exists());
+    assert!(main_done.exists());
+
+    fs::remove_dir_all(&dir).ok();
+}
