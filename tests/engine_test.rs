@@ -173,8 +173,7 @@ fn exit_on_first_error_stops_later_levels() {
     let path = write_template(&dir, "template.json", &body);
 
     let report = Engine::new(path.to_str().unwrap())
-        .execute(noop_error, noop_warning, noop_note)
-        .expect("engine should run");
+        .execute(noop_error, noop_warning, noop_note).unwrap();
 
     assert_eq!(report.results.len(), 1);
     assert!(!report.results[0].is_ok());
