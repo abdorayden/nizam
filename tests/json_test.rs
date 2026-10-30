@@ -1,7 +1,7 @@
 
 /// tests for load and unload functions from `json.rs` moduel
 
-use nizam::json::{load, unload, EngineTemplate, Model, TaskOptions};
+use nizam::json::{load, unload, Cmd, EngineTemplate, Model, TaskOptions};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -12,11 +12,11 @@ fn example_model() -> Model {
     let mut tasks = HashMap::new();
     tasks.insert(
         "1".to_string(),
-        TaskOptions { cmd: "sleep 5".to_string(), deps: vec![] },
+        TaskOptions { cmd: Cmd::SimplCmd("sleep 5".to_string()), deps: vec![] },
     );
     tasks.insert(
         "2".to_string(),
-        TaskOptions { cmd: "sleep 10".to_string(), deps: vec!["1".to_string()] },
+        TaskOptions { cmd: Cmd::SimplCmd("sleep 10".to_string()), deps: vec!["1".to_string()] },
     );
     Model { limite_tasks: Some(2), tasks, ..Default::default() }
 }
@@ -48,7 +48,7 @@ fn load_parses_json_file() {
     let model = load(path.to_str().unwrap()).unwrap();
     assert_eq!(model.limite_tasks, Some(2));
     assert_eq!(model.tasks.len(), 2);
-    assert_eq!(model.tasks["1"].cmd, "sleep 5");
+    assert_eq!(model.tasks["1"].cmd.as_str(), Some("sleep 5"));
     assert!(model.tasks["1"].deps.is_empty());
     assert_eq!(model.tasks["2"].deps, vec!["1".to_string()]);
     fs::remove_file(&path).ok();
@@ -102,8 +102,8 @@ fn parse_substitutes_bindings() {
 
     assert_eq!(model.limite_tasks, Some(2));
     assert_eq!(model.exit_on_first_error, Some(true));
-    assert_eq!(model.tasks["1"].cmd, "sleep 5");
-    assert_eq!(model.tasks["2"].cmd, "echo procm after 5s");
+    assert_eq!(model.tasks["1"].cmd.as_str(), Some("sleep 5"));
+    assert_eq!(model.tasks["2"].cmd.as_str(), Some("echo procm after 5s"));
     assert_eq!(model.tasks["2"].deps, vec!["1".to_string()]);
     assert_eq!(model.bind.unwrap().get("name").map(String::as_str), Some("procm"));
     fs::remove_file(&path).ok();
@@ -120,7 +120,7 @@ fn parse_keeps_unknown_bindings_untouched() {
 
     let model = EngineTemplate::new(path.to_str().unwrap()).parse();
 
-    assert_eq!(model.tasks["1"].cmd, "run 1 ^b^ ^");
+    assert_eq!(model.tasks["1"].cmd.as_str(), Some("run 1 ^b^ ^"));
     fs::remove_file(&path).ok();
 }
 
@@ -131,7 +131,126 @@ fn parse_without_bind_keeps_cmd_untouched() {
 
     let model = EngineTemplate::new(path.to_str().unwrap()).parse();
 
-    assert_eq!(model.tasks["1"].cmd, "sleep ^duration^");
+    assert_eq!(model.tasks["1"].cmd.as_str(), Some("sleep ^duration^"));
     assert!(model.bind.is_none());
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn load_preserves_conditional_cmd() {
+    let path = tmp_path("load_cond");
+    fs::write(
+        &path,
+        r#"{
+            "tasks": {
+                "1": {
+                    "cmd": [
+                        { "when": { "os": "linux" }, "run": "echo linux" },
+                        { "run": "echo fallback" }
+                    ]
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    let model = load(path.to_str().unwrap()).unwrap();
+    match &model.tasks["1"].cmd {
+        Cmd::Cond(conditions) => {
+            assert_eq!(conditions.len(), 2);
+            assert_eq!(conditions[0].when.as_ref().unwrap().os, "linux");
+            assert_eq!(conditions[1].when, None);
+        }
+        Cmd::SimplCmd(_) => panic!("expected a conditional command"),
+    }
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn parse_selects_matching_os_condition() {
+    let path = tmp_path("parse_cond_match");
+    let os = std::env::consts::OS;
+    let body = format!(
+        r#"{{
+            "tasks": {{
+                "1": {{
+                    "cmd": [
+                        {{ "when": {{ "os": "definitely-not-{os}" }}, "run": "echo wrong" }},
+                        {{ "when": {{ "os": "{os}" }}, "run": "echo right" }},
+                        {{ "run": "echo fallback" }}
+                    ]
+                }}
+            }}
+        }}"#
+    );
+    fs::write(&path, body).unwrap();
+
+    let model = EngineTemplate::new(path.to_str().unwrap()).parse();
+
+    assert_eq!(model.tasks["1"].cmd.as_str(), Some("echo right"));
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn parse_uses_fallback_when_no_condition_matches() {
+    let path = tmp_path("parse_cond_fallback");
+    fs::write(
+        &path,
+        r#"{
+            "tasks": {
+                "1": {
+                    "cmd": [
+                        { "when": { "os": "definitely-not-a-real-os" }, "run": "echo wrong" },
+                        { "run": "echo fallback" }
+                    ]
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    let model = EngineTemplate::new(path.to_str().unwrap()).parse();
+
+    assert_eq!(model.tasks["1"].cmd.as_str(), Some("echo fallback"));
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn parse_resolves_conditions_before_bindings() {
+    let path = tmp_path("parse_cond_bind");
+    let os = std::env::consts::OS;
+    let body = format!(
+        r#"{{
+            "bind": {{ "tool": "gcc" }},
+            "tasks": {{
+                "1": {{
+                    "cmd": [
+                        {{ "run": "echo not this" }},
+                        {{ "when": {{ "os": "{os}" }}, "run": "^tool^ -c foo.c" }}
+                    ]
+                }}
+            }}
+        }}"#
+    );
+    fs::write(&path, body).unwrap();
+
+    let model = EngineTemplate::new(path.to_str().unwrap()).parse();
+
+    assert_eq!(model.tasks["1"].cmd.as_str(), Some("gcc -c foo.c"));
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn parse_condition_without_match_or_fallback_is_empty() {
+    let path = tmp_path("parse_cond_empty");
+    fs::write(
+        &path,
+        r#"{ "tasks": { "1": { "cmd": [ { "when": { "os": "definitely-not-a-real-os" }, "run": "echo wrong" } ] } } }"#,
+    )
+    .unwrap();
+
+    let model = EngineTemplate::new(path.to_str().unwrap()).parse();
+
+    assert_eq!(model.tasks["1"].cmd.as_str(), Some(""));
     fs::remove_file(&path).ok();
 }
