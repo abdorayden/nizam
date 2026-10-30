@@ -13,8 +13,26 @@
 //      "duration" : "5"
 //   },
 //   "tasks": {
-//     "1": { "cmd": "sleep ^duration^" },
-//     "2": { "cmd": "sleep 10", "deps": ["1"] }
+//     "1": { 
+//          "cmd": "sleep ^duration^" 
+//      },
+//     "2": { 
+//          "cmd": "sleep 10", "deps": ["1"] 
+//      },
+//      "3": {
+//          "cmd": [
+//              {
+//                  "when": {
+//                      "os": "linux"
+//                  },
+//                  "run": "echo hey"
+//              },
+//              {
+//                  "run": "echo otherwise"
+//              }
+//          ],
+//          "deps": ["2"]
+//      }
 //   }
 // }
 // ```
@@ -31,10 +49,52 @@ use std::io::BufReader;
 use std::io::Read;
 use std::io::BufWriter;
 use std::io::Result;
+use std::env;
+
+/// built-in variables a conditional `when` can check.
+/// `os` is matched against the current platform (`std::env::consts::OS`).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BuiltInVarsCondition {
+    pub os: String,
+    /// reserved for future conditions; currently not evaluated
+    #[serde(default)]
+    pub condition: Option<String>,
+}
+
+impl BuiltInVarsCondition {
+    fn matches(&self) -> bool {
+        self.os.eq_ignore_ascii_case(std::env::consts::OS)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Conditional {
+    /// when omitted this entry is the fallback command
+    pub when: Option<BuiltInVarsCondition>,
+    pub run: String, // command that runs when the condition is true
+}
+
+/// a task command: either a plain string or a list of conditional commands
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum Cmd {
+    Cond(Vec<Conditional>),
+    SimplCmd(String),
+}
+
+impl Cmd {
+    /// returns the plain command string once the template has been parsed
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Cmd::SimplCmd(cmd) => Some(cmd),
+            Cmd::Cond(_) => None,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TaskOptions {
-    pub cmd: String,
+    pub cmd: Cmd,
     #[serde(default)]
     pub deps: Vec<String>,
 }
@@ -131,6 +191,32 @@ fn substitute_bindings(cmd: &str, bind: &Bindings) -> String {
     out
 }
 
+/// picks the first conditional whose `when` matches the current platform.
+/// falls back to the entry without a `when`. bindings are substituted after
+/// the command has been selected.
+fn resolve_conditions(conditions: Vec<Conditional>, bind: &Bindings) -> String {
+    let mut fallback: Option<String> = None;
+
+    for conditional in conditions {
+        match conditional.when {
+            Some(when) => {
+                if when.matches() {
+                    return substitute_bindings(&conditional.run, bind);
+                }
+            }
+            None => {
+                if fallback.is_none() {
+                    fallback = Some(conditional.run);
+                }
+            }
+        }
+    }
+
+    fallback
+        .map(|run| substitute_bindings(&run, bind))
+        .unwrap_or_default()
+}
+
 impl EngineTemplate {
     pub fn new(file_path: &str) -> Self {
         let model = load(file_path);
@@ -153,7 +239,16 @@ impl EngineTemplate {
             .expect("EngineTemplate must be valid")
             .clone();
 
-        let bind = og_model.bind.clone().unwrap_or_default();
+        let mut bind = og_model.bind.clone().unwrap_or_default();
+
+        bind.insert( // add builtin bindings
+            "pwd".to_string(),
+            if let Some(path)= env::home_dir() {
+                path.to_str().unwrap_or(&String::new()).to_string()
+            } else {
+                String::new()
+            }
+        );
 
         let mut model = Model {
             limite_tasks: og_model.limite_tasks,
@@ -163,10 +258,15 @@ impl EngineTemplate {
         };
 
         for (task_id, option) in og_model.tasks {
+            let cmd = match option.cmd {
+                Cmd::SimplCmd(command) => Cmd::SimplCmd(substitute_bindings(&command, &bind)),
+                Cmd::Cond(conditions) => Cmd::SimplCmd(resolve_conditions(conditions, &bind)),
+            };
+
             model.tasks.insert(
                 task_id,
                 TaskOptions {
-                    cmd: substitute_bindings(&option.cmd, &bind),
+                    cmd,
                     deps: option.deps,
                 },
             );
