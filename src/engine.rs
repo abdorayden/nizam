@@ -157,6 +157,24 @@ impl Engine {
             results,
         })
     }
+
+    pub fn run (&self, 
+        error: LogingError,
+        warning: LogingWarning,
+        note: LogingNote,
+        quit: Quit
+        ) {
+        match self.execute(error, warning, note) {
+            Some(exec) => {
+                if exec.schedule.has_cycle {
+                    quit()
+                }
+            }
+            None => {
+                quit()
+            }
+        }
+    }
 }
 
 /// returns the first dependency (sorted) that does not point to an existing task
