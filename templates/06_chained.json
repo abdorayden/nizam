@@ -1,0 +1,19 @@
+/// chained tasks
+{
+    "limite_tasks": 3,
+    "exit_on_first_error": true,
+    "bind": {
+        "delay": "0.2"
+    },
+    "tasks": {
+        "job_1": { "cmd": "sleep ^delay^" },
+        "job_2": { "cmd": "sleep ^delay^", "deps": ["job_1"] },
+        "job_3": { "cmd": "sleep ^delay^" , "deps": ["job_2"] },
+        "job_4": { "cmd": "sleep ^delay^" , "deps": ["job_3"] },
+        "job_5": { "cmd": "sleep ^delay^" , "deps": ["job_4"] },
+        "job_6": { "cmd": "sleep ^delay^" , "deps": ["job_5"] },
+        "job_7": { "cmd": "sleep ^delay^" , "deps": ["job_6"] },
+        "job_8": { "cmd": "sleep ^delay^" , "deps": ["job_7"] },
+        "job_9": { "cmd": "echo all jobs are done" , "deps": ["job_8"] }
+    }
+}
