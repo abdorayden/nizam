@@ -1,5 +1,5 @@
-<div align="center">
-  <img src="./assets/logo.png" alt="Nizam logo" width="520">
+<div align="center" style="background-color: #fff; max-width: 600px; margin: 0 auto 24px; padding: 20px; border-radius: 12px;">
+  <img src="./assets/logo.png" alt="Nizam task orchestration engine logo" width="520" style="display: block; width: 100%; max-width: 520px; height: auto;">
   <h1>Nizam</h1>
 </div>
 
