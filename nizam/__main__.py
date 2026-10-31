@@ -14,9 +14,11 @@ EXAMPLE:
 
 """ 
 
-import nizam
+from nizam import Engine, add
 from init import init_nizam_template
 
 if __name__ == "__main__":
     init_nizam_template()
-    print(nizam.add(1,2))
+    print(add(1,2))
+    # test the engine
+    Engine("templates/06_chained.json").run()

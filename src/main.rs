@@ -55,6 +55,7 @@ fn collect_paths(args: &[String]) -> Vec<PathBuf> {
     paths
 }
 
+// for a moment
 fn print_report(report: &Execution, elapsed: Duration) {
     let failed = report
         .results
@@ -100,7 +101,8 @@ fn main() {
 
         match engine.execute(log_error, log_warning, log_note) {
             Some(report) => {
-                print_report(&report, start.elapsed());
+                print_report(&report, start.elapsed()); // just  for test all report will be
+                                                        // executed in execute method
 
                 if report
                     .results
