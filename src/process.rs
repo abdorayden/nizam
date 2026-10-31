@@ -42,6 +42,41 @@ impl ProcInfo {
     }
 }
 
+/// Waits for a spawned command and captures its output as a `ProcInfo`.
+/// This can be called from a waiter thread so the engine can react as soon as
+/// any task completes instead of waiting for a whole batch.
+pub fn wait_child(cmd: String, child: Child) -> ProcInfo {
+    match child.wait_with_output() {
+        Ok(output) => {
+            let status = output.status;
+            let err = if output.stderr.is_empty() {
+                None
+            } else {
+                Some(String::from_utf8_lossy(&output.stderr).to_string())
+            };
+            ProcInfo::new(cmd, status, err, Some(output), false)
+        }
+        Err(e) => ProcInfo::new(
+            cmd,
+            ExitStatus::default(),
+            Some(e.to_string()),
+            None,
+            true,
+        ),
+    }
+}
+
+/// Creates the result for a command that could not be spawned.
+pub fn spawn_failure(cmd: String, error: std::io::Error) -> ProcInfo {
+    ProcInfo::new(
+        cmd,
+        ExitStatus::default(),
+        Some(error.to_string()),
+        None,
+        true,
+    )
+}
+
 /// CommandMultiChainedList is type that represent list of chained deps list of commands
 /// {
 ///     {

@@ -9,8 +9,11 @@
 
 use super::json::{EngineTemplate, Model};
 use super::kahn::{self, KahnResult};
-use super::process::{self, CommandMultiChainedList, ProcInfo};
+use super::process::{self, ProcInfo};
 use super::task_manager::find_missing_dep;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::mpsc;
+use std::thread;
 
 pub type LogingError = fn (msg: String);
 pub type LogingWarning = fn (msg: String);
@@ -32,6 +35,37 @@ pub struct Execution {
     pub schedule: KahnResult,
     /// process results in the order the tasks were executed
     pub results: Vec<ProcInfo>,
+}
+
+fn report_task_result(info: &ProcInfo, error: &LogingError) -> bool {
+    let failed = info.never_run || !info.is_ok();
+    if failed {
+        let detail = info.err.clone().unwrap_or_default();
+        if detail.is_empty() {
+            error(format!("task failed: {}", info.cmd));
+        } else {
+            error(format!("task failed: {}: {}", info.cmd, detail));
+        }
+    }
+    failed
+}
+
+fn release_dependents(
+    task_id: &str,
+    dependents: &HashMap<String, Vec<String>>,
+    remaining_deps: &mut HashMap<String, usize>,
+    ready: &mut BTreeSet<String>,
+) {
+    if let Some(children) = dependents.get(task_id) {
+        for child in children {
+            if let Some(count) = remaining_deps.get_mut(child) {
+                *count -= 1;
+                if *count == 0 {
+                    ready.insert(child.clone());
+                }
+            }
+        }
+    }
 }
 
 impl Engine {
@@ -99,58 +133,102 @@ impl Engine {
             None => None,
         };
 
-        let commands = kahn::commands(&schedule, &model.tasks);
-        let mut results: Vec<ProcInfo> = Vec::new();
-        let mut stop = false;
+        let max_running = limit.unwrap_or_else(|| model.tasks.len().max(1));
+        let mut remaining_deps: HashMap<String, usize> = model
+            .tasks
+            .iter()
+            .map(|(id, task)| (id.clone(), task.deps.len()))
+            .collect();
+        let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
+        for (id, task) in &model.tasks {
+            for dependency in &task.deps {
+                dependents
+                    .entry(dependency.clone())
+                    .or_default()
+                    .push(id.clone());
+            }
+        }
+        for children in dependents.values_mut() {
+            children.sort();
+        }
 
-        for (level_idx, level) in commands.iter().enumerate() {
-            if stop {
+        // A sorted ready set keeps dispatch deterministic while allowing tasks
+        // to start as soon as their own dependencies finish.
+        let mut ready: BTreeSet<String> = remaining_deps
+            .iter()
+            .filter_map(|(id, count)| (*count == 0).then_some(id.clone()))
+            .collect();
+        let (completed_tx, completed_rx) = mpsc::channel::<(String, ProcInfo)>();
+        let mut completed_results: HashMap<String, ProcInfo> = HashMap::new();
+        let mut running = 0usize;
+        let mut stop_scheduling = false;
+
+        note(format!(
+            "running {} task(s) with a concurrency limit of {}",
+            model.tasks.len(), max_running
+        ));
+
+        while !ready.is_empty() || running > 0 {
+            while !stop_scheduling && running < max_running {
+                let Some(task_id) = ready.pop_first() else {
+                    break;
+                };
+                let cmd = model.tasks[&task_id]
+                    .cmd
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+
+                match process::run_cmd_async(cmd.clone()) {
+                    Ok(child) => {
+                        running += 1;
+                        let sender = completed_tx.clone();
+                        thread::spawn(move || {
+                            let info = process::wait_child(cmd, child);
+                            let _ = sender.send((task_id, info));
+                        });
+                    }
+                    Err(spawn_error) => {
+                        let info = process::spawn_failure(cmd, spawn_error);
+                        let failed = report_task_result(&info, &error);
+                        completed_results.insert(task_id.clone(), info);
+
+                        if failed && exit_on_first_error {
+                            stop_scheduling = true;
+                            note("exit_on_first_error is set, stopping new tasks".to_string());
+                        } else {
+                            release_dependents(&task_id, &dependents, &mut remaining_deps, &mut ready);
+                        }
+                    }
+                }
+            }
+
+            if running == 0 {
                 break;
             }
 
-            note(format!(
-                "level {}: running {} task(s)",
-                level_idx + 1,
-                level.len()
-            ));
+            let (task_id, info) = completed_rx
+                .recv()
+                .expect("task waiter thread should report its result");
+            running -= 1;
+            let failed = report_task_result(&info, &error);
+            completed_results.insert(task_id.clone(), info);
 
-            let batch_size = limit.unwrap_or(level.len().max(1));
-
-            for batch in level.chunks(batch_size) {
-                if stop {
-                    break;
-                }
-
-                let multi: CommandMultiChainedList =
-                    batch.iter().map(|cmd| vec![cmd.clone()]).collect();
-                let infos = process::run_multi_chained(multi, true);
-
-                let mut failed = false;
-
-                for chain in infos {
-                    for info in chain {
-                        if info.never_run || !info.is_ok() {
-                            failed = true;
-                            let detail = info.err.clone().unwrap_or_default();
-                            if detail.is_empty() {
-                                error(format!("task failed: {}", info.cmd));
-                            } else {
-                                error(format!("task failed: {}: {}", info.cmd, detail));
-                            }
-                        }
-                        results.push(info);
-                    }
-                }
-
-                if failed && exit_on_first_error {
-                    note(format!(
-                        "exit_on_first_error is set, stopping after level {}",
-                        level_idx + 1
-                    ));
-                    stop = true;
-                }
+            if failed && exit_on_first_error {
+                stop_scheduling = true;
+                note("exit_on_first_error is set, stopping new tasks".to_string());
+            } else {
+                release_dependents(&task_id, &dependents, &mut remaining_deps, &mut ready);
             }
         }
+
+        // Preserve stable result ordering for callers even though tasks now
+        // finish in completion order.
+        let results = schedule
+            .order
+            .iter()
+            .filter_map(|task_id| completed_results.remove(task_id))
+            .collect();
 
         Some(Execution {
             model,
