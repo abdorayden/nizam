@@ -7,9 +7,10 @@
 ///  task_manager.rs
 ///
 
-use super::json::{EngineTemplate, Model, Tasks};
+use super::json::{EngineTemplate, Model};
 use super::kahn::{self, KahnResult};
 use super::process::{self, CommandMultiChainedList, ProcInfo};
+use super::task_manager::find_missing_dep;
 
 pub type LogingError = fn (msg: String);
 pub type LogingWarning = fn (msg: String);
@@ -175,20 +176,4 @@ impl Engine {
             }
         }
     }
-}
-
-/// returns the first dependency (sorted) that does not point to an existing task
-fn find_missing_dep(tasks: &Tasks) -> Option<(String, String)> {
-    let mut missing: Vec<(String, String)> = Vec::new();
-
-    for (id, task) in tasks {
-        for dep in &task.deps {
-            if !tasks.contains_key(dep) {
-                missing.push((id.clone(), dep.clone()));
-            }
-        }
-    }
-
-    missing.sort();
-    missing.into_iter().next()
 }

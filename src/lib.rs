@@ -3,12 +3,10 @@ use pyo3::prelude::*;
 
 pub mod json;
 pub mod engine;
-// pub mod kahn;
-// pub mod engine;
 pub mod kahn;
 // pub mod logs;
 pub mod process;
-// pub mod task_manager;
+pub mod task_manager;
 
 #[pyfunction]
 fn add(a: i64, b: i64) -> i64 {
