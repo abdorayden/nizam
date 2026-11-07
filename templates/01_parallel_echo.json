@@ -1,0 +1,12 @@
+// Every task has no dependency, so all of them are ready at the same time.
+// limite_tasks = 2 caps how many commands run in parallel.
+{
+    "limite_tasks": 2,
+    "exit_on_first_error": true,
+    "tasks": {
+        "first":  { "cmd": "sleep 0.3" },
+        "second": { "cmd": "sleep 0.3" },
+        "third":  { "cmd": "sleep 0.3" },
+        "fourth": { "cmd": "echo four is done" }
+    }
+}

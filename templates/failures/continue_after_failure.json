@@ -1,0 +1,10 @@
+// With exit_on_first_error = false the engine keeps going after a failure.
+// "after" depends on "bad", so it starts only after "bad" finished.
+{
+    "exit_on_first_error": false,
+    "tasks": {
+        "ok":    { "cmd": "echo starting" },
+        "bad":   { "cmd": "false", "deps": ["ok"] },
+        "after": { "cmd": "echo engine continued after the failure", "deps": ["bad"] }
+    }
+}
