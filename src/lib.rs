@@ -7,9 +7,10 @@ pub mod json;
 pub mod kahn;
 pub mod process;
 pub mod task_manager;
-// pub mod logs;
+pub mod logs;
 
 use crate::engine::{Engine, Execution};
+use crate::logs::{log_error, log_note, log_warning};
 use crate::process::ProcInfo;
 
 #[pyclass(name = "Engine")]
@@ -35,19 +36,6 @@ impl EngineWrapper {
             )),
         }
     }
-}
-
-// replace all those functions with prepared callbacks from logs module
-fn log_error(message: String) {
-    eprintln!("nizam error: {message}");
-}
-
-fn log_warning(message: String) {
-    eprintln!("nizam warning: {message}");
-}
-
-fn log_note(message: String) {
-    eprintln!("nizam: {message}");
 }
 
 #[pyclass(name = "Execution")]
