@@ -9,6 +9,7 @@
 
 use super::json::{EngineTemplate, Model};
 use super::kahn::{self, KahnResult};
+use super::logs::{log_end, log_start, log_task_error};
 use super::process::{self, ProcInfo};
 use super::task_manager::find_missing_dep;
 use std::collections::{BTreeSet, HashMap};
@@ -35,19 +36,6 @@ pub struct Execution {
     pub schedule: KahnResult,
     /// process results in the order the tasks were executed
     pub results: Vec<ProcInfo>,
-}
-
-fn report_task_result(info: &ProcInfo, error: &LogingError) -> bool {
-    let failed = info.never_run || !info.is_ok();
-    if failed {
-        let detail = info.err.clone().unwrap_or_default();
-        if detail.is_empty() {
-            error(format!("task failed: {}", info.cmd));
-        } else {
-            error(format!("task failed: {}: {}", info.cmd, detail));
-        }
-    }
-    failed
 }
 
 fn release_dependents(
@@ -179,21 +167,50 @@ impl Engine {
                     .unwrap_or_default()
                     .to_string();
 
-                match process::run_cmd_async(cmd.clone()) {
-                    Ok(child) => {
+                let sender = completed_tx.clone();
+                let thread_task_id = task_id.clone();
+                let thread_cmd = cmd.clone();
+                let thread_result = thread::Builder::new()
+                    .name(format!("task-{task_id}"))
+                    .spawn(move || {
+                        log_start(&thread_task_id, &thread_cmd);
+
+                        let info = match process::run_cmd_async(thread_cmd.clone()) {
+                            Ok(child) => process::wait_child(thread_cmd, child),
+                            Err(spawn_error) => {
+                                process::spawn_failure(thread_cmd, spawn_error)
+                            }
+                        };
+
+                        if info.never_run || !info.is_ok() {
+                            let detail = info.err.as_deref().unwrap_or("task failed");
+                            log_task_error(&thread_task_id, detail);
+                        }
+
+                        let code = if info.never_run {
+                            None
+                        } else {
+                            info.status.code()
+                        };
+                        log_end(&thread_task_id, code);
+
+                        let _ = sender.send((thread_task_id, info));
+                    });
+
+                match thread_result {
+                    Ok(_) => {
                         running += 1;
-                        let sender = completed_tx.clone();
-                        thread::spawn(move || {
-                            let info = process::wait_child(cmd, child);
-                            let _ = sender.send((task_id, info));
-                        });
                     }
-                    Err(spawn_error) => {
-                        let info = process::spawn_failure(cmd, spawn_error);
-                        let failed = report_task_result(&info, &error);
+                    Err(thread_error) => {
+                        log_task_error(
+                            &task_id,
+                            &format!("cannot create thread: {thread_error}"),
+                        );
+                        log_end(&task_id, None);
+                        let info = process::spawn_failure(cmd, thread_error);
                         completed_results.insert(task_id.clone(), info);
 
-                        if failed && exit_on_first_error {
+                        if exit_on_first_error {
                             stop_scheduling = true;
                             note("exit_on_first_error is set, stopping new tasks".to_string());
                         } else {
@@ -211,7 +228,7 @@ impl Engine {
                 .recv()
                 .expect("task waiter thread should report its result");
             running -= 1;
-            let failed = report_task_result(&info, &error);
+            let failed = info.never_run || !info.is_ok();
             completed_results.insert(task_id.clone(), info);
 
             if failed && exit_on_first_error {
