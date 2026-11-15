@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 
 use crate::json::Tasks;
+use crate::logs::{log_entry, make_entry, LogLevel};
 
 // résultat ta3 l'algorithme
 #[derive(Debug)]
@@ -79,6 +80,13 @@ pub fn sort(tasks: &Tasks) -> KahnResult {
         let level = ready.clone();
         levels.push(level.clone());
 
+        // nloggiw les tâches li wliw prêts f hada niveau
+        log_entry(make_entry(
+            LogLevel::Info,
+            None,
+            &format!("niveau {} prêt: {}", levels.len(), level.join(", ")),
+        ));
+
         // nemshou ready bach n3emrouha b niveau li jay
         ready.clear();
 
@@ -106,6 +114,16 @@ pub fn sort(tasks: &Tasks) -> KahnResult {
 
     // les tâches li ma wselouch l 0 rahom bloqués fi cycle
     let has_cycle = order.len() != tasks.len();
+
+    // nloggiw résumé ta3 l'ordonnancement.
+    // ila kayen cycle, l'engine houwa li yloggi l'erreur, bach ma n3awdouhach.
+    if !has_cycle {
+        log_entry(make_entry(
+            LogLevel::Info,
+            None,
+            &format!("{} tâche(s) f {} niveau(x)", order.len(), levels.len()),
+        ));
+    }
 
     KahnResult {
         order,

@@ -1,21 +1,10 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use nizam::engine::{Engine, Execution};
-
-fn log_error(msg: String) {
-    eprintln!("  [error] {msg}");
-}
-
-fn log_warning(msg: String) {
-    eprintln!("  [warning] {msg}");
-}
-
-fn log_note(msg: String) {
-    println!("  [note] {msg}");
-}
+use nizam::engine::Engine;
+use nizam::logs::{log_error, log_note, log_report, log_warning};
 
 fn json_files(dir: &Path) -> Vec<PathBuf> {
     match fs::read_dir(dir) {
@@ -55,33 +44,6 @@ fn collect_paths(args: &[String]) -> Vec<PathBuf> {
     paths
 }
 
-// for a moment
-fn print_report(report: &Execution, elapsed: Duration) {
-    let failed = report
-        .results
-        .iter()
-        .filter(|info| info.never_run || !info.is_ok())
-        .count();
-    let ok = report.results.len() - failed;
-
-    for info in &report.results {
-        let status = if info.never_run {
-            "skipped"
-        } else if info.is_ok() {
-            "ok"
-        } else {
-            "failed"
-        };
-        println!("  [{status}] {}", info.cmd);
-    }
-
-    println!(
-        "  {} level(s), {ok} ok, {failed} failed, {:.2?}",
-        report.schedule.levels.len(),
-        elapsed
-    );
-}
-
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let paths = collect_paths(&args);
@@ -101,8 +63,8 @@ fn main() {
 
         match engine.execute(log_error, log_warning, log_note) {
             Some(report) => {
-                print_report(&report, start.elapsed()); // just  for test all report will be
-                                                        // executed in execute method
+                log_report(&report, start.elapsed());
+                // just for test all report will be executed in execute method
 
                 if report
                     .results
